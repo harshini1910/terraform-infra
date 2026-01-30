@@ -1,5 +1,6 @@
 terraform {
-  required_version = ">= 1.3"
+  required_version = ">= 1.5"
+
   required_providers {
     aws = {
       source  = "hashicorp/aws"
@@ -12,12 +13,12 @@ provider "aws" {
   region = var.region
 }
 
-# Get default VPC (simple setup)
+# Use default VPC for simplicity
 data "aws_vpc" "default" {
   default = true
 }
 
-# Get a default subnet from the default VPC
+# Use available subnets from default VPC
 data "aws_subnets" "default" {
   filter {
     name   = "vpc-id"
@@ -25,8 +26,7 @@ data "aws_subnets" "default" {
   }
 }
 
-# Latest Ubuntu 22.04 LTS AMI (stable choice)
-# If you specifically need 24.04, tell me and I’ll switch it.
+# Latest Ubuntu 22.04 LTS AMI (recommended stable for cloud labs)
 data "aws_ami" "ubuntu" {
   most_recent = true
   owners      = ["099720109477"] # Canonical
@@ -39,7 +39,7 @@ data "aws_ami" "ubuntu" {
 
 # Security group: SSH + HTTP
 resource "aws_security_group" "web_sg" {
-  name        = "web-sg"
+  name        = "${var.tags_project}-web-sg"
   description = "Allow SSH and HTTP"
   vpc_id      = data.aws_vpc.default.id
 
@@ -60,6 +60,7 @@ resource "aws_security_group" "web_sg" {
   }
 
   egress {
+    description = "All outbound"
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
@@ -67,11 +68,12 @@ resource "aws_security_group" "web_sg" {
   }
 
   tags = {
-    Name = "web-sg"
+    Project = var.tags_project
+    Name    = "${var.tags_project}-web-sg"
   }
 }
 
-# User data scripts
+# User data scripts for Apache & Nginx
 locals {
   apache_user_data = <<-EOF
     #!/bin/bash
@@ -99,16 +101,18 @@ resource "aws_instance" "apache" {
   count         = 2
   ami           = data.aws_ami.ubuntu.id
   instance_type = var.instance_type
+  key_name      = var.key_name
 
+  # distribute across subnets (if multiple exist)
   subnet_id              = data.aws_subnets.default.ids[count.index % length(data.aws_subnets.default.ids)]
   vpc_security_group_ids = [aws_security_group.web_sg.id]
-  key_name               = var.key_name
 
   user_data = local.apache_user_data
 
   tags = {
-    Name = "apache-${count.index + 1}"
-    Role = "apache"
+    Project = var.tags_project
+    Name    = "apache-${count.index + 1}"
+    Role    = "apache"
   }
 }
 
@@ -117,15 +121,16 @@ resource "aws_instance" "nginx" {
   count         = 2
   ami           = data.aws_ami.ubuntu.id
   instance_type = var.instance_type
+  key_name      = var.key_name
 
   subnet_id              = data.aws_subnets.default.ids[count.index % length(data.aws_subnets.default.ids)]
   vpc_security_group_ids = [aws_security_group.web_sg.id]
-  key_name               = var.key_name
 
   user_data = local.nginx_user_data
 
   tags = {
-    Name = "nginx-${count.index + 1}"
-    Role = "nginx"
+    Project = var.tags_project
+    Name    = "nginx-${count.index + 1}"
+    Role    = "nginx"
   }
 }
